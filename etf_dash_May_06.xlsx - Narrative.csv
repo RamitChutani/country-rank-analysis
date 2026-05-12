@@ -1,0 +1,39 @@
+Country,Category,Rank
+Japan,Strong Buy,1
+India,Strong Buy,2
+United Kingdom,Strong Buy,3
+Brazil,Strong Buy,4
+France,Strong Buy,5
+Greece,Strong Buy,6
+United States,Buy,7
+Poland,Buy,8
+Singapore,Buy,9
+South Korea,Buy,10
+Malaysia,Buy,11
+Chile,Buy,12
+Spain,Buy,13
+Taiwan,Buy,14
+Hong Kong,Buy,15
+Mexico,Neutral,16
+Australia,Neutral,17
+Ireland,Neutral,18
+South Africa,Neutral,19
+Indonesia,Neutral,20
+Italy,Neutral,21
+Philippines,Neutral,22
+Norway,Neutral,23
+Thailand,Neutral,24
+Denmark,Neutral,25
+Netherlands,Neutral,26
+Turkey,Neutral,27
+Peru,Neutral,28
+Sweden,Neutral,29
+Colombia,Negative,30
+China,Negative,31
+Canada,Negative,32
+Finland,Negative,33
+Belgium,Negative,34
+Switzerland,Negative,35
+Austria,Negative,36
+Germany,Negative,37
+New Zealand,Negative,38
