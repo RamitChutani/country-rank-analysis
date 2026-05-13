@@ -19,7 +19,7 @@
     - [World Bank (wbgapi)](https://github.com/t-solomon/wbgapi) for Market Cap.
     - [IMF API](https://www.imf.org/external/datamapper/api/v1/) for GDP data.
     - [BIS](https://www.bis.org/) for REER data.
-    - Excel (`etf_dash_May_06.xlsx`) for static valuation and narrative ranks.
+    - Static files in `data/static/` for bond differentials, valuation ranks, narrative ranks, market cap, and oil imports.
 
 ---
 
@@ -35,7 +35,7 @@
    uv sync
    ```
 2. **Environment:**
-   Ensure `etf_dash_May_06.xlsx` is present in the root directory as it contains critical static data.
+   Ensure the static data files are present in `data/static/`.
 
 ### Running the Application
 To launch the Streamlit dashboard:
@@ -62,7 +62,8 @@ uv run streamlit run app.py
 - `pyproject.toml`: Managed via `uv`, defining all project dependencies.
 
 ### File Structure Notes
-- `etf_dash_May_06.xlsx`: Primary static data source.
+- `data/static/`: Runtime static data sources.
+- `data/reference_workbooks/`: Archived Excel model/reference files.
 - `*.csv`: These files appear to be exports or reference snapshots of specific data points from the main Excel workbook.
 
 ---

@@ -116,7 +116,7 @@ def fetch_etf_journey(terminal_date):
     tickers = list(COUNTRY_CONFIG.items())
     for i, (name, meta) in enumerate(tickers):
         try:
-            df = yf.download(meta['ticker'], start=start_date.strftime("%Y-%m-%d"), progress=False)
+            df = yf.download(meta['ticker'], start=start_date.strftime("%Y-%m-%d"), progress=False, auto_adjust=True)
             if not df.empty:
                 close = df['Close'][meta['ticker']] if isinstance(df.columns, pd.MultiIndex) else df['Close']
                 valid = close[close.index <= term_dt]
@@ -157,7 +157,7 @@ def fetch_bis_reer_journey():
 @st.cache_data
 def fetch_oil_impact_journey():
     """Fetch crude oil import data and map to COUNTRY_CONFIG."""
-    excel_path = 'oil impact/Total Oil Imports by country 2024.xlsx'
+    excel_path = 'data/static/oil_imports_2024.xlsx'
     try:
         df = pd.read_excel(excel_path, sheet_name='2024 imports')
         df.columns = [c.strip() for c in df.columns]
@@ -203,15 +203,14 @@ with st.sidebar:
 
 # --- 5. DATA ORCHESTRATION ---
 
-excel_file = "etf_dash_May_06.xlsx"
 try:
     with st.spinner("Fetching Data..."):
         gdp_j, etf_j, reer_j = fetch_imf_gdp_journey(), fetch_etf_journey(term_date), fetch_bis_reer_journey()
         oil_j = fetch_oil_impact_journey()
-        mcap_static = pd.read_csv("mcap_data.csv")
-        bond_df = pd.read_excel(excel_file, sheet_name="10y bond")[['Country', 'differential with USA']]
-        val_df = pd.read_excel(excel_file, sheet_name="Valuation Ranks")[['Country', 'Average Rank']]
-        nar_df = pd.read_excel(excel_file, sheet_name="Narrative")[['Country', 'Rank']]
+        mcap_static = pd.read_csv("data/static/mcap_data.csv")
+        bond_df = pd.read_csv("data/static/bond_10y_differentials.csv")
+        val_df = pd.read_csv("data/static/valuation_ranks.csv")
+        nar_df = pd.read_csv("data/static/narrative_ranks.csv")
 
     master = pd.DataFrame(COUNTRY_CONFIG.keys(), columns=["Country"])
     master["Region"] = master["Country"].map(lambda x: COUNTRY_CONFIG[x]["region"])

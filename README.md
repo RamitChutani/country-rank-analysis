@@ -8,10 +8,10 @@ The dashboard calculates a Composite Score for over 30 countries based on five k
 2. **Currency & Yield (20%):** Composite of BIS REER (Real Effective Exchange Rate) over/undervaluation and 10Y government bond yield differentials.
 3. **Fundamental Valuation (20%):** Re-ranked pricing metrics (CAPE, P/B, P/CF) from proprietary research.
 4. **Qualitative Narrative (30%):** Subjective sentiment ranks accounting for geopolitical or structural factors.
-5. **Market Liquidity (10%):** Live Market Cap data (World Bank) to ensure actionable opportunities.
+5. **Market Liquidity (10%):** Static market-cap data to ensure actionable opportunities.
 
 ## 🚀 Features
-- **Live API Integration:** Real-time data from IMF (GDP), Yahoo Finance (ETFs), BIS (REER), and World Bank (Mcap).
+- **Live/API + Static Data Integration:** Data from IMF (GDP), Yahoo Finance (ETFs), BIS (REER), plus curated static CSV/XLSX inputs in `data/static/`.
 - **Dynamic Re-weighting:** Adjust pillar weights and recalculate global ranks instantly.
 - **Smart Date Logic:** Fetches the most recent valid trading day on or before the selected terminal date.
 - **Data Audit:** Comprehensive transparency tabs showing the journey from raw API data to final rankings.
