@@ -4,7 +4,7 @@
 
 Runtime inputs used by `app.py`.
 
-- `bond_10y_differentials.csv`: 10-year government bond differential versus the US.
+- `bond_10y_differentials.csv`: 10-year government bond yields; the app calculates the differential versus the US.
 - `valuation_ranks.csv`: static valuation rank inputs.
 - `narrative_ranks.csv`: static narrative rank inputs.
 - `mcap_data.csv`: market-cap liquidity input.

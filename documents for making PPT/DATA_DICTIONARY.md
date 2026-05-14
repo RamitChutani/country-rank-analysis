@@ -26,7 +26,8 @@ Use these files as the source of truth for the deck:
 - `GDP_CAGR_10Y`: 10-year GDP CAGR as a fraction.
 - `ETF_CAGR_10Y`: 10-year ETF price CAGR as a fraction.
 - `REER_Upside`: estimated REER mean-reversion upside as a fraction.
-- `differential with USA`: 10Y government bond yield differential versus US.
+- `10Y bond yield`: raw 10-year government bond yield from static data.
+- `differential with USA`: calculated 10Y government bond yield differential versus US.
 - `Average Rank`: raw valuation input rank.
 - `Rank`: raw narrative input rank.
 - `Mcap_USD_Bn`: market capitalization in USD billions.

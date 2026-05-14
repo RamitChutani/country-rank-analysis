@@ -1,0 +1,37 @@
+Rank,Country,ETF_Ticker,Factsheet_URL,Downloaded_File
+1,Indonesia,EIDO,https://www.ishares.com/us/literature/fact-sheet/eido-ishares-msci-indonesia-etf-fund-fact-sheet-en-us.pdf,01_Indonesia_EIDO_factsheet.pdf
+2,Brazil,EWZ,https://www.ishares.com/us/literature/fact-sheet/ewz-ishares-msci-brazil-etf-fund-fact-sheet-en-us.pdf,02_Brazil_EWZ_factsheet.pdf
+3,India,INDA,https://www.ishares.com/us/literature/fact-sheet/inda-ishares-msci-india-etf-fund-fact-sheet-en-us.pdf,03_India_INDA_factsheet.pdf
+4,Hong Kong,EWH,https://www.ishares.com/us/literature/fact-sheet/ewh-ishares-msci-hong-kong-etf-fund-fact-sheet-en-us.pdf,04_Hong_Kong_EWH_factsheet.pdf
+5,Chile,ECH,https://www.ishares.com/us/literature/fact-sheet/ech-ishares-msci-chile-etf-fund-fact-sheet-en-us.pdf,05_Chile_ECH_factsheet.pdf
+6,Philippines,EPHE,https://www.ishares.com/us/literature/fact-sheet/ephe-ishares-msci-philippines-etf-fund-fact-sheet-en-us.pdf,06_Philippines_EPHE_factsheet.pdf
+7,United Kingdom,EWU,https://www.ishares.com/us/literature/fact-sheet/ewu-ishares-msci-united-kingdom-etf-fund-fact-sheet-en-us.pdf,07_United_Kingdom_EWU_factsheet.pdf
+8,France,EWQ,https://www.ishares.com/us/literature/fact-sheet/ewq-ishares-msci-france-etf-fund-fact-sheet-en-us.pdf,08_France_EWQ_factsheet.pdf
+9,Turkey,TUR,https://www.ishares.com/us/literature/fact-sheet/tur-ishares-msci-turkey-etf-fund-fact-sheet-en-us.pdf,09_Turkey_TUR_factsheet.pdf
+10,Poland,EPOL,https://www.ishares.com/us/literature/fact-sheet/epol-ishares-msci-poland-etf-fund-fact-sheet-en-us.pdf,10_Poland_EPOL_factsheet.pdf
+11,Malaysia,EWM,https://www.ishares.com/us/literature/fact-sheet/ewm-ishares-msci-malaysia-etf-fund-fact-sheet-en-us.pdf,11_Malaysia_EWM_factsheet.pdf
+12,Japan,EWJ,https://www.ishares.com/us/literature/fact-sheet/ewj-ishares-msci-japan-etf-fund-fact-sheet-en-us.pdf,12_Japan_EWJ_factsheet.pdf
+13,South Korea,EWY,https://www.ishares.com/us/literature/fact-sheet/ewy-ishares-msci-south-korea-etf-fund-fact-sheet-en-us.pdf,13_South_Korea_EWY_factsheet.pdf
+14,Singapore,EWS,https://www.ishares.com/us/literature/fact-sheet/ews-ishares-msci-singapore-etf-fund-fact-sheet-en-us.pdf,14_Singapore_EWS_factsheet.pdf
+15,China,MCHI,https://www.ishares.com/us/literature/fact-sheet/mchi-ishares-msci-china-etf-fund-fact-sheet-en-us.pdf,15_China_MCHI_factsheet.pdf
+16,Mexico,EWW,https://www.ishares.com/us/literature/fact-sheet/eww-ishares-msci-mexico-etf-fund-fact-sheet-en-us.pdf,16_Mexico_EWW_factsheet.pdf
+17,Australia,EWA,https://www.ishares.com/us/literature/fact-sheet/ewa-ishares-msci-australia-etf-fund-fact-sheet-en-us.pdf,17_Australia_EWA_factsheet.pdf
+18,Thailand,THD,https://www.ishares.com/us/literature/fact-sheet/thd-ishares-msci-thailand-etf-fund-fact-sheet-en-us.pdf,18_Thailand_THD_factsheet.pdf
+19,Norway,ENOR,https://www.ishares.com/us/literature/fact-sheet/enor-ishares-msci-norway-etf-fund-fact-sheet-en-us.pdf,19_Norway_ENOR_factsheet.pdf
+20,Colombia,GXG,https://assets.globalxetfs.com/funds/documents/colo/Fact-Sheet_COLO.pdf,20_Colombia_GXG_factsheet.pdf
+21,Italy,EWI,https://www.ishares.com/us/literature/fact-sheet/ewi-ishares-msci-italy-etf-fund-fact-sheet-en-us.pdf,21_Italy_EWI_factsheet.pdf
+22,South Africa,EZA,https://www.ishares.com/us/literature/fact-sheet/eza-ishares-msci-south-africa-etf-fund-fact-sheet-en-us.pdf,22_South_Africa_EZA_factsheet.pdf
+23,Spain,EWP,https://www.ishares.com/us/literature/fact-sheet/ewp-ishares-msci-spain-etf-fund-fact-sheet-en-us.pdf,23_Spain_EWP_factsheet.pdf
+24,Greece,GREK,https://assets.globalxetfs.com/funds/documents/grek/Fact-Sheet_GREK.pdf,24_Greece_GREK_factsheet.pdf
+25,United States,IVV,https://www.ishares.com/us/literature/fact-sheet/ivv-ishares-core-s-p-500-etf-fund-fact-sheet-en-us.pdf,25_United_States_IVV_factsheet.pdf
+26,Ireland,EIRL,https://www.ishares.com/us/literature/fact-sheet/eirl-ishares-msci-ireland-etf-fund-fact-sheet-en-us.pdf,26_Ireland_EIRL_factsheet.pdf
+27,Denmark,EDEN,https://www.ishares.com/us/literature/fact-sheet/eden-ishares-msci-denmark-etf-fund-fact-sheet-en-us.pdf,27_Denmark_EDEN_factsheet.pdf
+28,Germany,EWG,https://www.ishares.com/us/literature/fact-sheet/ewg-ishares-msci-germany-etf-fund-fact-sheet-en-us.pdf,28_Germany_EWG_factsheet.pdf
+29,Finland,EFNL,https://www.ishares.com/us/literature/fact-sheet/efnl-ishares-msci-finland-etf-fund-fact-sheet-en-us.pdf,29_Finland_EFNL_factsheet.pdf
+30,Belgium,EWK,https://www.ishares.com/us/literature/fact-sheet/ewk-ishares-msci-belgium-etf-fund-fact-sheet-en-us.pdf,30_Belgium_EWK_factsheet.pdf
+31,Canada,EWC,https://www.ishares.com/us/literature/fact-sheet/ewc-ishares-msci-canada-etf-fund-fact-sheet-en-us.pdf,31_Canada_EWC_factsheet.pdf
+32,Taiwan,EWT,https://www.ishares.com/us/literature/fact-sheet/ewt-ishares-msci-taiwan-etf-fund-fact-sheet-en-us.pdf,32_Taiwan_EWT_factsheet.pdf
+33,Sweden,EWD,https://www.ishares.com/us/literature/fact-sheet/ewd-ishares-msci-sweden-etf-fund-fact-sheet-en-us.pdf,33_Sweden_EWD_factsheet.pdf
+34,Netherlands,EWN,https://www.ishares.com/us/literature/fact-sheet/ewn-ishares-msci-netherlands-etf-fund-fact-sheet-en-us.pdf,34_Netherlands_EWN_factsheet.pdf
+35,Switzerland,EWL,https://www.ishares.com/us/literature/fact-sheet/ewl-ishares-msci-switzerland-etf-fund-fact-sheet-en-us.pdf,35_Switzerland_EWL_factsheet.pdf
+36,Austria,EWO,https://www.ishares.com/us/literature/fact-sheet/ewo-ishares-msci-austria-etf-fund-fact-sheet-en-us.pdf,36_Austria_EWO_factsheet.pdf

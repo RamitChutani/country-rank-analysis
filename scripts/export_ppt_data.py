@@ -172,6 +172,8 @@ def build_master(static_dir: Path, terminal_date: str, oil_scenario: float) -> p
     oil = load_oil(static_dir)
     mcap = pd.read_csv(static_dir / "mcap_data.csv")
     bond = pd.read_csv(static_dir / "bond_10y_differentials.csv")
+    us_bond_yield = bond.loc[bond["Country"] == "United States", "10Y bond yield"].iloc[0]
+    bond["differential with USA"] = bond["10Y bond yield"] - us_bond_yield
     val = pd.read_csv(static_dir / "valuation_ranks.csv")
     nar = pd.read_csv(static_dir / "narrative_ranks.csv")
 
