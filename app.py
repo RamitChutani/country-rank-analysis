@@ -5,6 +5,7 @@ import numpy as np
 import requests
 from io import BytesIO
 from datetime import datetime
+from pathlib import Path
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
@@ -13,6 +14,10 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 st.set_page_config(page_title="Macro ETF Strategy Dashboard", layout="wide")
 
 st.title("🌍 Global Macro Strategy Dashboard")
+
+STATIC_DIR = Path("data/static")
+VALUATION_PATH = STATIC_DIR / "valuation_ranks.csv"
+NARRATIVE_PATH = STATIC_DIR / "narrative_ranks.csv"
 
 # --- 1. SESSION STATE & DEFAULTS ---
 DEFAULTS = {
@@ -29,8 +34,11 @@ for key, val in DEFAULTS.items():
     if key not in st.session_state:
         st.session_state[key] = val
 
-if "calculate" not in st.session_state:
-    st.session_state.calculate = False
+if "calc_snapshot" not in st.session_state:
+    st.session_state.calc_snapshot = None
+
+if "research_editor_version" not in st.session_state:
+    st.session_state.research_editor_version = 0
 
 # --- 2. CONFIGURATION & MAPPINGS ---
 COUNTRY_CONFIG = {
@@ -162,7 +170,7 @@ def fetch_bis_reer_journey():
 @st.cache_data
 def fetch_oil_impact_journey():
     """Fetch crude oil import data and map to COUNTRY_CONFIG."""
-    excel_path = 'data/static/oil_imports_2024.xlsx'
+    excel_path = STATIC_DIR / "oil_imports_2024.xlsx"
     try:
         df = pd.read_excel(excel_path, sheet_name='2024 imports')
         df.columns = [c.strip() for c in df.columns]
@@ -177,10 +185,126 @@ def fetch_oil_impact_journey():
         return pd.DataFrame(columns=['Country', 'Crude (kg)', 'Crude (mb/d)', 'Conversion_Factor'])
 
 
+def load_research_inputs():
+    return (
+        pd.read_csv(VALUATION_PATH),
+        pd.read_csv(NARRATIVE_PATH),
+    )
+
+
+def build_research_editor_inputs(val_source_df, nar_source_df):
+    """Expose model-facing final ranks, not raw static-file column names."""
+    countries = pd.DataFrame({"Country": list(COUNTRY_CONFIG.keys())})
+    val_editor = countries.merge(val_source_df[["Country", "Average Rank"]], on="Country", how="left")
+    nar_editor = countries.merge(nar_source_df[["Country", "Rank"]], on="Country", how="left")
+    val_editor["Valuation Rank"] = pd.to_numeric(val_editor["Average Rank"], errors="coerce").rank(method="first", ascending=True).astype("Int64")
+    nar_editor["Narrative Rank"] = pd.to_numeric(nar_editor["Rank"], errors="coerce").rank(method="first", ascending=True).astype("Int64")
+    return (
+        val_editor[["Country", "Valuation Rank"]],
+        nar_editor[["Country", "Narrative Rank"]],
+    )
+
+
+def normalize_research_inputs(val_df, nar_df):
+    # The app edits final model ranks. These are mapped back to the legacy
+    # static-file columns because downstream workbook/export code expects them.
+    val_clean = val_df[["Country", "Valuation Rank"]].rename(columns={"Valuation Rank": "Average Rank"}).copy()
+    nar_clean = nar_df[["Country", "Narrative Rank"]].rename(columns={"Narrative Rank": "Rank"}).copy()
+    val_clean["Country"] = val_clean["Country"].astype(str).str.strip()
+    nar_clean["Country"] = nar_clean["Country"].astype(str).str.strip()
+    val_clean["Average Rank"] = pd.to_numeric(val_clean["Average Rank"], errors="coerce")
+    nar_clean["Rank"] = pd.to_numeric(nar_clean["Rank"], errors="coerce")
+    return val_clean, nar_clean
+
+
+def merge_research_inputs_for_save(saved_df, edited_df, value_col, storage_col):
+    merged_df = saved_df.copy()
+    edited_clean = edited_df[["Country", value_col]].rename(columns={value_col: storage_col}).copy()
+    edited_clean["Country"] = edited_clean["Country"].astype(str).str.strip()
+    edited_clean[storage_col] = pd.to_numeric(edited_clean[storage_col], errors="coerce")
+    update_map = edited_clean.set_index("Country")[storage_col]
+    if storage_col not in merged_df.columns:
+        merged_df[storage_col] = np.nan
+    merged_df[storage_col] = merged_df["Country"].map(update_map).combine_first(merged_df[storage_col])
+    configured_countries = set(COUNTRY_CONFIG.keys())
+    missing_saved = sorted(configured_countries - set(merged_df["Country"]))
+    if missing_saved:
+        additions = pd.DataFrame({"Country": missing_saved, storage_col: [update_map.get(country, np.nan) for country in missing_saved]})
+        merged_df = pd.concat([merged_df, additions], ignore_index=True)
+    return merged_df
+
+
+def validate_research_inputs(val_df, nar_df):
+    errors = []
+    required = {
+        "Valuation": (val_df, ["Country", "Valuation Rank"], "Valuation Rank"),
+        "Narrative": (nar_df, ["Country", "Narrative Rank"], "Narrative Rank"),
+    }
+    for label, (df, columns, numeric_col) in required.items():
+        missing_cols = [col for col in columns if col not in df.columns]
+        if missing_cols:
+            errors.append(f"{label} is missing column(s): {', '.join(missing_cols)}")
+            continue
+        countries = df["Country"].astype(str).str.strip()
+        if countries.eq("").any() or df["Country"].isna().any():
+            errors.append(f"{label} has blank country values.")
+        duplicate_countries = sorted(countries[countries.duplicated()].unique())
+        if duplicate_countries:
+            errors.append(f"{label} has duplicate countries: {', '.join(duplicate_countries)}")
+        numeric_values = pd.to_numeric(df[numeric_col], errors="coerce")
+        raw_values = df[numeric_col]
+        nonblank_values = raw_values.notna() & raw_values.astype(str).str.strip().ne("")
+        invalid_nonblank = countries[numeric_values.isna() & nonblank_values].tolist()
+        if invalid_nonblank:
+            errors.append(f"{label} has non-numeric {numeric_col} values for: {', '.join(invalid_nonblank)}")
+    return errors
+
+
+def build_master_dataset(gdp_df, etf_df, reer_df, oil_df, mcap_df, bond_df, val_df, nar_df):
+    master_df = pd.DataFrame(COUNTRY_CONFIG.keys(), columns=["Country"])
+    master_df["Region"] = master_df["Country"].map(lambda x: COUNTRY_CONFIG[x]["region"])
+    for d in [gdp_df, etf_df, reer_df, oil_df, mcap_df, bond_df, val_df]:
+        if not d.empty:
+            master_df = master_df.merge(d, on="Country", how="left")
+    return master_df.merge(nar_df, on="Country", how="left")
+
+
+def calculate_strategy(master_df, horizon, weights):
+    required = [f'GDP_CAGR_{horizon}Y', f'ETF_CAGR_{horizon}Y', 'Mcap_USD_Bn', 'REER_Upside', 'differential with USA', 'Average Rank', 'Rank']
+    calc_df = master_df.dropna(subset=required).copy()
+
+    if calc_df.empty:
+        return calc_df
+
+    calc_df['Macro_Gap'] = calc_df[f'GDP_CAGR_{horizon}Y'] - calc_df[f'ETF_CAGR_{horizon}Y']
+    calc_df['R_Macro'] = calc_df['Macro_Gap'].rank(ascending=False).astype(int)
+    calc_df['R_REER'] = calc_df['REER_Upside'].rank(ascending=False).astype(int)
+    calc_df['R_Bond'] = calc_df['differential with USA'].rank(ascending=False).astype(int)
+    calc_df['Currency_Score'] = (calc_df['R_REER'] + calc_df['R_Bond']) / 2
+    calc_df['R_Curr'] = calc_df['Currency_Score'].rank().astype(int)
+    calc_df['R_Val'] = calc_df['Average Rank'].rank(method="first", ascending=True).astype(int)
+    calc_df['R_Nar'] = calc_df['Rank'].rank(method="first", ascending=True).astype(int)
+    calc_df['R_Mcap'] = calc_df['Mcap_USD_Bn'].rank(ascending=False).astype(int)
+    calc_df['Final_Score'] = (
+        calc_df['R_Macro'] * weights["macro"]
+        + calc_df['R_Curr'] * weights["curr"]
+        + calc_df['R_Val'] * weights["val"]
+        + calc_df['R_Nar'] * weights["nar"]
+        + calc_df['R_Mcap'] * weights["mcap"]
+    )
+    calc_df = calc_df.sort_values("Final_Score")
+    calc_df['Final Rank'] = range(1, len(calc_df) + 1)
+    return calc_df
+
+
+def excel_value(value):
+    return None if pd.isna(value) else value
+
+
 def _write_dataframe_sheet(wb, title, df):
     ws = wb.create_sheet(title)
     for row in dataframe_to_rows(df, index=False, header=True):
-        ws.append(row)
+        ws.append([excel_value(value) for value in row])
     for cell in ws[1]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="1F4E78")
@@ -302,31 +426,31 @@ def build_editable_model_workbook(
 
     for offset, (_, row) in enumerate(model_df.iterrows(), start=0):
         r = data_start + offset
-        ws[f"B{r}"] = row["Country"]
-        ws[f"C{r}"] = row["Region"]
-        ws[f"D{r}"] = row.get("ETF Ticker")
-        ws[f"E{r}"] = row[f"GDP_CAGR_{horizon}Y"]
-        ws[f"F{r}"] = row[f"ETF_CAGR_{horizon}Y"]
+        ws[f"B{r}"] = excel_value(row["Country"])
+        ws[f"C{r}"] = excel_value(row["Region"])
+        ws[f"D{r}"] = excel_value(row.get("ETF Ticker"))
+        ws[f"E{r}"] = excel_value(row[f"GDP_CAGR_{horizon}Y"])
+        ws[f"F{r}"] = excel_value(row[f"ETF_CAGR_{horizon}Y"])
         ws[f"G{r}"] = f"=E{r}-F{r}"
         ws[f"H{r}"] = f"=INT(RANK.AVG(G{r},$G${data_start}:$G${data_end},0))"
-        ws[f"I{r}"] = row["Current_REER"]
-        ws[f"J{r}"] = row["Avg_REER_10Y"]
+        ws[f"I{r}"] = excel_value(row["Current_REER"])
+        ws[f"J{r}"] = excel_value(row["Avg_REER_10Y"])
         ws[f"K{r}"] = f"=(J{r}-I{r})/J{r}"
         ws[f"L{r}"] = f"=INT(RANK.AVG(K{r},$K${data_start}:$K${data_end},0))"
-        ws[f"M{r}"] = row["10Y bond yield"]
+        ws[f"M{r}"] = excel_value(row["10Y bond yield"])
         ws[f"N{r}"] = f"=M{r}-$M${us_excel_row}" if us_excel_row else f"=M{r}"
         ws[f"O{r}"] = f"=INT(RANK.AVG(N{r},$N${data_start}:$N${data_end},0))"
         ws[f"P{r}"] = f"=(L{r}+O{r})/2"
         ws[f"Q{r}"] = f"=INT(RANK.AVG(P{r},$P${data_start}:$P${data_end},1))"
-        ws[f"R{r}"] = row["Average Rank"]
+        ws[f"R{r}"] = excel_value(row["Average Rank"])
         ws[f"S{r}"] = f"=INT(RANK.AVG(R{r},$R${data_start}:$R${data_end},1))"
-        ws[f"T{r}"] = row["Rank"]
+        ws[f"T{r}"] = excel_value(row["Rank"])
         ws[f"U{r}"] = f"=INT(RANK.AVG(T{r},$T${data_start}:$T${data_end},1))"
-        ws[f"V{r}"] = row["Mcap_USD_Bn"]
+        ws[f"V{r}"] = excel_value(row["Mcap_USD_Bn"])
         ws[f"W{r}"] = f"=INT(RANK.AVG(V{r},$V${data_start}:$V${data_end},0))"
         ws[f"X{r}"] = f"=H{r}*$B$7+Q{r}*$B$8+S{r}*$B$9+U{r}*$B$10+W{r}*$B$11"
         ws[f"A{r}"] = f'=RANK.EQ(X{r},$X${data_start}:$X${data_end},1)+COUNTIF($X${data_start}:X{r},X{r})-1'
-        ws[f"Y{r}"] = row.get("YTD_Return")
+        ws[f"Y{r}"] = excel_value(row.get("YTD_Return"))
 
     percent_cols = ["E", "F", "G", "K", "Y"]
     for r in range(data_start, data_end + 1):
@@ -378,172 +502,261 @@ with st.sidebar:
         for k, v in DEFAULTS.items(): 
             if k.startswith("w_"): st.session_state[f"s_{k.replace('w_', '')}"] = v
         st.rerun()
-    if col2.button("Calculate Rank", type="primary", disabled=(total_w != 1.0)):
-        st.session_state.calculate = True
+    calculate_clicked = col2.button("Calculate Rank", type="primary", disabled=(total_w != 1.0))
 
 # --- 5. DATA ORCHESTRATION ---
 
 try:
+    if "valuation_editor_df" not in st.session_state or "narrative_editor_df" not in st.session_state:
+        saved_val_df, saved_nar_df = load_research_inputs()
+        editor_val_df, editor_nar_df = build_research_editor_inputs(saved_val_df, saved_nar_df)
+        st.session_state.valuation_editor_df = editor_val_df
+        st.session_state.narrative_editor_df = editor_nar_df
+
     with st.spinner("Fetching Data..."):
         gdp_j, etf_j, reer_j = fetch_imf_gdp_journey(), fetch_etf_journey(term_date), fetch_bis_reer_journey()
         oil_j = fetch_oil_impact_journey()
-        mcap_static = pd.read_csv("data/static/mcap_data.csv")
-        bond_df = pd.read_csv("data/static/bond_10y_differentials.csv")
+        mcap_static = pd.read_csv(STATIC_DIR / "mcap_data.csv")
+        bond_df = pd.read_csv(STATIC_DIR / "bond_10y_differentials.csv")
         us_bond_yield = bond_df.loc[bond_df["Country"] == "United States", "10Y bond yield"].iloc[0]
         bond_df["differential with USA"] = bond_df["10Y bond yield"] - us_bond_yield
-        val_df = pd.read_csv("data/static/valuation_ranks.csv")
-        nar_df = pd.read_csv("data/static/narrative_ranks.csv")
 
-    master = pd.DataFrame(COUNTRY_CONFIG.keys(), columns=["Country"])
-    master["Region"] = master["Country"].map(lambda x: COUNTRY_CONFIG[x]["region"])
-    for d in [gdp_j, etf_j, reer_j, oil_j, mcap_static, bond_df, val_df]:
-        if not d.empty: master = master.merge(d, on="Country", how="left")
-    master = master.merge(nar_df, on="Country", how="left")
+    strategy_tab, inputs_tab, raw_tab, export_tab = st.tabs([
+        "Strategy Output",
+        "Editable Inputs",
+        "Raw Data & Calculations",
+        "Excel Export",
+    ])
 
-    st.subheader("Excel Model Export")
-    export_weights = {
+    with inputs_tab:
+        st.subheader("Editable Research Inputs")
+        st.caption("Edit final model ranks here. The model output updates only after you click Calculate Rank. Save writes these values back to data/static.")
+        st.info("Valuation Rank and Narrative Rank are the final ranks used by the model. The legacy CSV columns are named Average Rank and Rank; those storage names are intentionally hidden here.")
+        editor_version = st.session_state.research_editor_version
+        editor_col1, editor_col2 = st.columns(2)
+        with editor_col1:
+            st.markdown("#### Valuation Final Ranks")
+            edited_val_df = st.data_editor(
+                st.session_state.valuation_editor_df,
+                key=f"valuation_editor_{editor_version}",
+                use_container_width=True,
+                hide_index=True,
+                num_rows="fixed",
+                disabled=["Country"],
+                column_config={
+                    "Country": st.column_config.TextColumn("Country"),
+                    "Valuation Rank": st.column_config.NumberColumn("Valuation Rank", min_value=1, step=1),
+                },
+            )
+        with editor_col2:
+            st.markdown("#### Narrative Final Ranks")
+            edited_nar_df = st.data_editor(
+                st.session_state.narrative_editor_df,
+                key=f"narrative_editor_{editor_version}",
+                use_container_width=True,
+                hide_index=True,
+                num_rows="fixed",
+                disabled=["Country"],
+                column_config={
+                    "Country": st.column_config.TextColumn("Country"),
+                    "Narrative Rank": st.column_config.NumberColumn("Narrative Rank", min_value=1, step=1),
+                },
+            )
+
+        research_errors = validate_research_inputs(edited_val_df, edited_nar_df)
+        action_col1, action_col2 = st.columns(2)
+        if action_col1.button("Save Research Inputs", disabled=bool(research_errors)):
+            saved_val_raw, saved_nar_raw = load_research_inputs()
+            save_val_df = merge_research_inputs_for_save(saved_val_raw, edited_val_df, "Valuation Rank", "Average Rank")
+            save_nar_df = merge_research_inputs_for_save(saved_nar_raw, edited_nar_df, "Narrative Rank", "Rank")
+            save_val_df.to_csv(VALUATION_PATH, index=False)
+            save_nar_df.to_csv(NARRATIVE_PATH, index=False)
+            editor_val_df, editor_nar_df = build_research_editor_inputs(save_val_df, save_nar_df)
+            st.session_state.valuation_editor_df = editor_val_df
+            st.session_state.narrative_editor_df = editor_nar_df
+            st.session_state.research_editor_version += 1
+            st.success("Research inputs saved to data/static.")
+            st.rerun()
+        if action_col2.button("Reset to Last Saved"):
+            saved_val_df, saved_nar_df = load_research_inputs()
+            editor_val_df, editor_nar_df = build_research_editor_inputs(saved_val_df, saved_nar_df)
+            st.session_state.valuation_editor_df = editor_val_df
+            st.session_state.narrative_editor_df = editor_nar_df
+            st.session_state.research_editor_version += 1
+            st.rerun()
+        for error in research_errors:
+            st.error(error)
+
+    current_weights = {
         "macro": st.session_state.s_macro,
         "curr": st.session_state.s_curr,
         "val": st.session_state.s_val,
         "nar": st.session_state.s_nar,
         "mcap": st.session_state.s_mcap,
     }
-    workbook_bytes = build_editable_model_workbook(
-        master=master,
-        gdp_df=gdp_j,
-        etf_df=etf_j,
-        reer_df=reer_j,
-        oil_df=oil_j,
-        mcap_df=mcap_static,
-        bond_df=bond_df,
-        val_df=val_df,
-        nar_df=nar_df,
-        horizon=st.session_state.horizon,
-        weights=export_weights,
-        terminal_date=term_date,
-        oil_scenario=st.session_state.oil_scenario,
-    )
-    st.download_button(
-        "Download Editable Excel Model",
-        data=workbook_bytes,
-        file_name=f"macro_etf_editable_model_{pd.to_datetime(term_date).strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        help="Exports the current dashboard data snapshot. The final sheet has editable weights, valuation inputs, narrative inputs, and Excel formulas.",
-    )
+
+    if calculate_clicked:
+        if research_errors:
+            st.error("Fix research input errors before calculating rank.")
+        else:
+            val_df, nar_df = normalize_research_inputs(edited_val_df, edited_nar_df)
+            master = build_master_dataset(gdp_j, etf_j, reer_j, oil_j, mcap_static, bond_df, val_df, nar_df)
+            calc_df = calculate_strategy(master, st.session_state.horizon, current_weights)
+            st.session_state.calc_snapshot = {
+                "master": master,
+                "calc_df": calc_df,
+                "gdp_df": gdp_j,
+                "etf_df": etf_j,
+                "reer_df": reer_j,
+                "oil_df": oil_j,
+                "mcap_df": mcap_static,
+                "bond_df": bond_df,
+                "val_df": val_df,
+                "nar_df": nar_df,
+                "horizon": st.session_state.horizon,
+                "weights": current_weights.copy(),
+                "terminal_date": term_date,
+                "oil_scenario": st.session_state.oil_scenario,
+            }
+
+    snapshot = st.session_state.calc_snapshot
+
+    with export_tab:
+        st.subheader("Excel Model Export")
+        if snapshot:
+            workbook_bytes = build_editable_model_workbook(
+                master=snapshot["master"],
+                gdp_df=snapshot["gdp_df"],
+                etf_df=snapshot["etf_df"],
+                reer_df=snapshot["reer_df"],
+                oil_df=snapshot["oil_df"],
+                mcap_df=snapshot["mcap_df"],
+                bond_df=snapshot["bond_df"],
+                val_df=snapshot["val_df"],
+                nar_df=snapshot["nar_df"],
+                horizon=snapshot["horizon"],
+                weights=snapshot["weights"],
+                terminal_date=snapshot["terminal_date"],
+                oil_scenario=snapshot["oil_scenario"],
+            )
+            st.download_button(
+                "Download Editable Excel Model",
+                data=workbook_bytes,
+                file_name=f"macro_etf_editable_model_{pd.to_datetime(snapshot['terminal_date']).strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="Exports the last calculated dashboard snapshot. Recalculate after edits to update this export.",
+            )
+        else:
+            st.info("Calculate rank once to enable the Excel model export.")
 
     # --- 6. STRATEGY OUTPUT (GATED) ---
-    if not st.session_state.calculate:
-        st.info("💡 Adjust weights in the sidebar and click **Calculate Rank** to generate the strategy output.")
-    else:
-        h = st.session_state.horizon
-        required = [f'GDP_CAGR_{h}Y', f'ETF_CAGR_{h}Y', 'Mcap_USD_Bn', 'REER_Upside', 'differential with USA', 'Average Rank', 'Rank']
-        calc_df = master.dropna(subset=required).copy()
-        
-        if not calc_df.empty:
-            calc_df['Macro_Gap'] = calc_df[f'GDP_CAGR_{h}Y'] - calc_df[f'ETF_CAGR_{h}Y']
-            calc_df['R_Macro'] = calc_df['Macro_Gap'].rank(ascending=False).astype(int)
-            calc_df['R_REER'] = calc_df['REER_Upside'].rank(ascending=False).astype(int)
-            calc_df['R_Bond'] = calc_df['differential with USA'].rank(ascending=False).astype(int)
-            calc_df['Currency_Score'] = (calc_df['R_REER'] + calc_df['R_Bond']) / 2
-            calc_df['R_Curr'] = calc_df['Currency_Score'].rank().astype(int)
-            calc_df['R_Val'] = calc_df['Average Rank'].rank(ascending=True).astype(int)
-            calc_df['R_Nar'] = calc_df['Rank'].rank(ascending=True).astype(int)
-            calc_df['R_Mcap'] = calc_df['Mcap_USD_Bn'].rank(ascending=False).astype(int)
-            calc_df['Final_Score'] = (calc_df['R_Macro']*st.session_state.s_macro + calc_df['R_Curr']*st.session_state.s_curr + calc_df['R_Val']*st.session_state.s_val + calc_df['R_Nar']*st.session_state.s_nar + calc_df['R_Mcap']*st.session_state.s_mcap)
-            calc_df = calc_df.sort_values("Final_Score")
-            calc_df['Final Rank'] = range(1, len(calc_df) + 1)
-
-            st.header(f"🏆 Strategy Output ({h}Y Horizon)")
-            final_map = {
-                'Final Rank': 'Final Rank', 'Country': 'country', 'Region': 'region',
-                'Macro_Gap': 'Macro Gap', 'R_Macro': 'Macro Gap Rank',
-                'Currency_Score': 'Currency Score', 'R_Curr': 'Currency Rank',
-                'R_Val': 'Valuation Rank', 'R_Nar': 'Narrative Rank',
-                'R_Mcap': 'MCap Rank', 'Final_Score': 'Final Score',
-                'YTD_Return': 'YTD $ ETF Return (%)'
-            }
-            display = calc_df[list(final_map.keys())].rename(columns=final_map)
-            pct_cols = ['Macro Gap', 'YTD $ ETF Return (%)']
-            for col in pct_cols: display[col] = display[col] * 100
-            
-            st.dataframe(
-                display.style.format({
-                    'Final Rank': '{:d}', 'Final Score': '{:.1f}', 'Currency Score': '{:.1f}',
-                    **{c: '{:.1f}' for c in pct_cols},
-                    **{c: '{:d}' for c in ['Macro Gap Rank', 'Currency Rank', 'Valuation Rank', 'Narrative Rank', 'MCap Rank']}
-                }).background_gradient(subset=['Final Score', 'Final Rank'], cmap='RdYlGn_r'),
-                use_container_width=True, hide_index=True
-            )
-
-    st.divider()
-    st.header("🔍 Raw Data & Calculations")
-    t_gdp, t_etf, t_curr, t_qual, t_oil, t_master = st.tabs(["Raw GDP Data", "Raw ETF Data", "Raw Currency Data", "Raw Research Data", "Raw Oil Data", "Merged Data"])
-    
-    with t_gdp:
-        st.subheader("GDP Data: Raw nGDP (bn) -> CAGRs")
-        g_cols = ["Country"] + [c for c in gdp_j.columns if "GDP_" in c]
-        st.dataframe(gdp_j[g_cols].style.format({c: "{:,.0f}" if "CAGR" not in c else "{:.1%}" for c in g_cols if c != "Country"}), use_container_width=True)
-    with t_etf:
-        st.subheader("ETF Data: Tickers, Anchor Prices -> CAGRs")
-        etf_format = {
-            c: "{:.1f}" if c.startswith("P_") else "{:.1%}"
-            for c in etf_j.columns
-            if c not in ["Country", "ETF Ticker"]
-        }
-        st.dataframe(etf_j.style.format(etf_format), use_container_width=True)
-    with t_curr:
-        if st.session_state.calculate:
-            st.subheader("Currency Data: REER & Bond Rank Calculation")
-            curr_map = {
-                'Country': 'Country', 'Current_REER': 'Current REER', 'Avg_REER_10Y': '10Y Avg REER',
-                'REER_Upside': 'REER Upside (%)', 'R_REER': 'REER Rank',
-                'differential with USA': 'Bond Diff vs US', 'R_Bond': 'Bond Rank', 'Currency_Score': 'Currency Score (Avg Rank)'
-            }
-            st.dataframe(calc_df[list(curr_map.keys())].rename(columns=curr_map).style.format({
-                'REER Upside (%)': '{:.1%}', 'REER Rank': '{:d}', 'Bond Rank': '{:d}',
-                'Current REER': '{:.1f}', '10Y Avg REER': '{:.1f}', 'Bond Diff vs US': '{:.1f}', 'Currency Score (Avg Rank)': '{:.1f}'
-            }), use_container_width=True)
-    with t_qual:
-        if st.session_state.calculate:
-            st.subheader("Research Data: Valuation, Narrative & MCap Calculation")
-            qual_map = {
-                'Country': 'Country', 'Average Rank': 'Valuation Rank Score', 'R_Val': 'Valuation Rank',
-                'R_Nar': 'Narrative Rank', 'Mcap_USD_Bn': '2026 MCap ($ bn.)', 'R_Mcap': 'MCap Rank'
-            }
-            st.dataframe(calc_df[list(qual_map.keys())].rename(columns=qual_map).style.format({
-                'Valuation Rank Score': '{:.1f}', '2026 MCap ($ bn.)': '{:,.0f}',
-                'Valuation Rank': '{:d}', 'Narrative Rank': '{:d}', 'MCap Rank': '{:d}'
-            }), use_container_width=True)
-            
-    with t_oil:
-        st.subheader("Crude Oil Impact Proxy")
-        oil_cols = ['Country', 'Crude (kg)', 'Crude (mb/d)', 'Conversion_Factor', 'GDP_2025']
-        if all(col in master.columns for col in oil_cols):
-            scenario = st.session_state.oil_scenario
-            oil_calc = master[oil_cols].copy()
-            oil_calc['Annual_Impact_USD_Bn'] = (oil_calc['Crude (mb/d)'] * 1e6 * scenario * 365) / 1e9
-            oil_calc['GDP_Impact_Pct'] = (oil_calc['Annual_Impact_USD_Bn'] / oil_calc['GDP_2025'])
-            
-            faulty_countries = oil_calc[ (oil_calc['Country'] == 'Thailand') | (oil_calc['Crude (mb/d)'] > 3.0) & (oil_calc['Country'] != 'China') & (oil_calc['Country'] != 'United States') & (oil_calc['Country'] != 'India') ]
-            flagged_list = faulty_countries['Country'].tolist()
-            oil_clean = oil_calc[~oil_calc['Country'].isin(flagged_list)].dropna(subset=['Crude (mb/d)', 'GDP_2025'])
-            
-            oil_view_map = {
-                'Country': 'Country', 'Crude (kg)': '2024 Crude Imports (kg)', 
-                'Conversion_Factor': 'Factor (Barrels/Tonne)', 'Crude (mb/d)': '2024 Imports (mb/d)',
-                'Annual_Impact_USD_Bn': f'${scenario:.0f} Price Move Annual Impact ($ bn)',
-                'GDP_Impact_Pct': 'Impact on 2025 GDP (%)'
-            }
-            st.dataframe(oil_clean[list(oil_view_map.keys())].rename(columns=oil_view_map).style.format({
-                '2024 Crude Imports (kg)': '{:,.0f}', 'Factor (Barrels/Tonne)': '{:.2f}',
-                '2024 Imports (mb/d)': '{:.1f}', f'${scenario:.0f} Price Move Annual Impact ($ bn)': '{:.1f}',
-                'Impact on 2025 GDP (%)': '{:.1%}'
-            }), use_container_width=True)
-            if flagged_list:
-                st.info(f"⚠️ **Note:** The following countries were omitted due to unrealistic crude import data (Sanity Check Failure): {', '.join(flagged_list)}")
+    with strategy_tab:
+        if not snapshot:
+            st.info("💡 Adjust weights in the sidebar and click **Calculate Rank** to generate the strategy output.")
         else:
-            st.warning("Oil columns not found in master dataset.")
+            h = snapshot["horizon"]
+            master = snapshot["master"]
+            calc_df = snapshot["calc_df"]
+            st.caption("Displayed output and Excel export use the last Calculate Rank snapshot. Recalculate after changing inputs or settings.")
             
-    with t_master: st.dataframe(master, use_container_width=True)
+            if not calc_df.empty:
+                st.header(f"🏆 Strategy Output ({h}Y Horizon)")
+                final_map = {
+                    'Final Rank': 'Final Rank', 'Country': 'country', 'Region': 'region',
+                    'Macro_Gap': 'Macro Gap', 'R_Macro': 'Macro Gap Rank',
+                    'Currency_Score': 'Currency Score', 'R_Curr': 'Currency Rank',
+                    'R_Val': 'Valuation Rank', 'R_Nar': 'Narrative Rank',
+                    'R_Mcap': 'MCap Rank', 'Final_Score': 'Final Score',
+                    'YTD_Return': 'YTD $ ETF Return (%)'
+                }
+                display = calc_df[list(final_map.keys())].rename(columns=final_map)
+                pct_cols = ['Macro Gap', 'YTD $ ETF Return (%)']
+                for col in pct_cols: display[col] = display[col] * 100
+                
+                st.dataframe(
+                    display.style.format({
+                        'Final Rank': '{:d}', 'Final Score': '{:.1f}', 'Currency Score': '{:.1f}',
+                        **{c: '{:.1f}' for c in pct_cols},
+                        **{c: '{:d}' for c in ['Macro Gap Rank', 'Currency Rank', 'Valuation Rank', 'Narrative Rank', 'MCap Rank']}
+                    }).background_gradient(subset=['Final Score', 'Final Rank'], cmap='RdYlGn_r'),
+                    use_container_width=True, hide_index=True
+                )
+            else:
+                st.warning("No countries have all required inputs for the selected horizon.")
+
+    with raw_tab:
+        st.header("🔍 Raw Data & Calculations")
+        t_gdp, t_etf, t_curr, t_qual, t_oil, t_master = st.tabs(["Raw GDP Data", "Raw ETF Data", "Raw Currency Data", "Raw Research Data", "Raw Oil Data", "Merged Data"])
+    
+        with t_gdp:
+            st.subheader("GDP Data: Raw nGDP (bn) -> CAGRs")
+            g_cols = ["Country"] + [c for c in gdp_j.columns if "GDP_" in c]
+            st.dataframe(gdp_j[g_cols].style.format({c: "{:,.0f}" if "CAGR" not in c else "{:.1%}" for c in g_cols if c != "Country"}), use_container_width=True)
+        with t_etf:
+            st.subheader("ETF Data: Tickers, Anchor Prices -> CAGRs")
+            etf_format = {
+                c: "{:.1f}" if c.startswith("P_") else "{:.1%}"
+                for c in etf_j.columns
+                if c not in ["Country", "ETF Ticker"]
+            }
+            st.dataframe(etf_j.style.format(etf_format), use_container_width=True)
+        with t_curr:
+            if snapshot and not calc_df.empty:
+                st.subheader("Currency Data: REER & Bond Rank Calculation")
+                curr_map = {
+                    'Country': 'Country', 'Current_REER': 'Current REER', 'Avg_REER_10Y': '10Y Avg REER',
+                    'REER_Upside': 'REER Upside (%)', 'R_REER': 'REER Rank',
+                    'differential with USA': 'Bond Diff vs US', 'R_Bond': 'Bond Rank', 'Currency_Score': 'Currency Score (Avg Rank)'
+                }
+                st.dataframe(calc_df[list(curr_map.keys())].rename(columns=curr_map).style.format({
+                    'REER Upside (%)': '{:.1%}', 'REER Rank': '{:d}', 'Bond Rank': '{:d}',
+                    'Current REER': '{:.1f}', '10Y Avg REER': '{:.1f}', 'Bond Diff vs US': '{:.1f}', 'Currency Score (Avg Rank)': '{:.1f}'
+                }), use_container_width=True)
+        with t_qual:
+            if snapshot and not calc_df.empty:
+                st.subheader("Research Data: Valuation, Narrative & MCap Calculation")
+                qual_map = {
+                    'Country': 'Country', 'Average Rank': 'Legacy Valuation Storage', 'R_Val': 'Valuation Rank',
+                    'R_Nar': 'Narrative Rank', 'Mcap_USD_Bn': '2026 MCap ($ bn.)', 'R_Mcap': 'MCap Rank'
+                }
+                st.dataframe(calc_df[list(qual_map.keys())].rename(columns=qual_map).style.format({
+                    'Legacy Valuation Storage': '{:.1f}', '2026 MCap ($ bn.)': '{:,.0f}',
+                    'Valuation Rank': '{:d}', 'Narrative Rank': '{:d}', 'MCap Rank': '{:d}'
+                }), use_container_width=True)
+                
+        with t_oil:
+            st.subheader("Crude Oil Impact Proxy")
+            oil_cols = ['Country', 'Crude (kg)', 'Crude (mb/d)', 'Conversion_Factor', 'GDP_2025']
+            if snapshot and all(col in master.columns for col in oil_cols):
+                scenario = snapshot["oil_scenario"]
+                oil_calc = master[oil_cols].copy()
+                oil_calc['Annual_Impact_USD_Bn'] = (oil_calc['Crude (mb/d)'] * 1e6 * scenario * 365) / 1e9
+                oil_calc['GDP_Impact_Pct'] = (oil_calc['Annual_Impact_USD_Bn'] / oil_calc['GDP_2025'])
+                
+                faulty_countries = oil_calc[ (oil_calc['Country'] == 'Thailand') | (oil_calc['Crude (mb/d)'] > 3.0) & (oil_calc['Country'] != 'China') & (oil_calc['Country'] != 'United States') & (oil_calc['Country'] != 'India') ]
+                flagged_list = faulty_countries['Country'].tolist()
+                oil_clean = oil_calc[~oil_calc['Country'].isin(flagged_list)].dropna(subset=['Crude (mb/d)', 'GDP_2025'])
+                
+                oil_view_map = {
+                    'Country': 'Country', 'Crude (kg)': '2024 Crude Imports (kg)', 
+                    'Conversion_Factor': 'Factor (Barrels/Tonne)', 'Crude (mb/d)': '2024 Imports (mb/d)',
+                    'Annual_Impact_USD_Bn': f'${scenario:.0f} Price Move Annual Impact ($ bn)',
+                    'GDP_Impact_Pct': 'Impact on 2025 GDP (%)'
+                }
+                st.dataframe(oil_clean[list(oil_view_map.keys())].rename(columns=oil_view_map).style.format({
+                    '2024 Crude Imports (kg)': '{:,.0f}', 'Factor (Barrels/Tonne)': '{:.2f}',
+                    '2024 Imports (mb/d)': '{:.1f}', f'${scenario:.0f} Price Move Annual Impact ($ bn)': '{:.1f}',
+                    'Impact on 2025 GDP (%)': '{:.1%}'
+                }), use_container_width=True)
+                if flagged_list:
+                    st.info(f"⚠️ **Note:** The following countries were omitted due to unrealistic crude import data (Sanity Check Failure): {', '.join(flagged_list)}")
+            else:
+                st.warning("Calculate rank to populate the oil impact view.")
+                
+        with t_master:
+            if snapshot:
+                st.dataframe(master, use_container_width=True)
+            else:
+                st.info("Calculate rank to populate the merged model dataset.")
 
 except Exception as e: st.error(f"❌ Error: {e}")

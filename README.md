@@ -12,7 +12,8 @@ The dashboard calculates a Composite Score for over 30 countries based on five k
 
 ## 🚀 Features
 - **Live/API + Static Data Integration:** Data from IMF (GDP), Yahoo Finance (ETFs), BIS (REER), plus curated static CSV/XLSX inputs in `data/static/`.
-- **Dynamic Re-weighting:** Adjust pillar weights and recalculate global ranks instantly.
+- **Button-Gated Recalculation:** Adjust weights and research inputs without changing outputs until **Calculate Rank** is clicked.
+- **Editable Research Inputs:** Edit valuation and narrative ranks in-app, calculate with unsaved changes, and optionally save them back to `data/static/`.
 - **Smart Date Logic:** Fetches the most recent valid trading day on or before the selected terminal date.
 - **Data Audit:** Comprehensive transparency tabs showing the journey from raw API data to final rankings.
 
@@ -28,7 +29,10 @@ The dashboard calculates a Composite Score for over 30 countries based on five k
    ```
 4. **Usage:**
    - Adjust weights in the sidebar (must sum to 100%).
+   - Use the **Editable Inputs** tab to edit final valuation and narrative ranks if needed.
+   - Note: the app displays final editable ranks even though the legacy CSV columns are named `Average Rank` and `Rank`.
    - Click **Calculate Rank** to update the strategy output.
+   - Click **Save Research Inputs** only when the edited valuation/narrative inputs should persist across future sessions.
    - Use the **Data Audit** tabs to verify logic and completeness.
 
 ## 🗺️ Roadmap & Future Improvements
