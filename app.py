@@ -26,6 +26,7 @@ DEFAULTS = {
     "w_val": 0.20,
     "w_nar": 0.30,
     "w_mcap": 0.10,
+    "w_curr_mix": 0.50,
     "horizon": 10,
     "oil_scenario": 10.0
 }
@@ -269,7 +270,7 @@ def build_master_dataset(gdp_df, etf_df, reer_df, oil_df, mcap_df, bond_df, val_
     return master_df.merge(nar_df, on="Country", how="left")
 
 
-def calculate_strategy(master_df, horizon, weights):
+def calculate_strategy(master_df, horizon, weights, currency_mix):
     required = [f'GDP_CAGR_{horizon}Y', f'ETF_CAGR_{horizon}Y', 'Mcap_USD_Bn', 'REER_Upside', 'differential with USA', 'Average Rank', 'Rank']
     calc_df = master_df.dropna(subset=required).copy()
 
@@ -280,7 +281,10 @@ def calculate_strategy(master_df, horizon, weights):
     calc_df['R_Macro'] = calc_df['Macro_Gap'].rank(ascending=False).astype(int)
     calc_df['R_REER'] = calc_df['REER_Upside'].rank(ascending=False).astype(int)
     calc_df['R_Bond'] = calc_df['differential with USA'].rank(ascending=False).astype(int)
-    calc_df['Currency_Score'] = (calc_df['R_REER'] + calc_df['R_Bond']) / 2
+    calc_df['Currency_Score'] = (
+        calc_df['R_REER'] * currency_mix
+        + calc_df['R_Bond'] * (1 - currency_mix)
+    )
     calc_df['R_Curr'] = calc_df['Currency_Score'].rank().astype(int)
     calc_df['R_Val'] = calc_df['Average Rank'].rank(method="first", ascending=True).astype(int)
     calc_df['R_Nar'] = calc_df['Rank'].rank(method="first", ascending=True).astype(int)
@@ -328,6 +332,7 @@ def build_editable_model_workbook(
     nar_df,
     horizon,
     weights,
+    currency_mix,
     terminal_date,
     oil_scenario,
 ):
@@ -382,7 +387,10 @@ def build_editable_model_workbook(
     ws["A12"] = "Total weight"
     ws["B12"] = "=SUM(B7:B11)"
     ws["B12"].number_format = "0%"
-    ws["D7"] = "Edit the weights in B7:B11. Edit valuation and narrative input columns in the table below."
+    ws["A13"] = "Currency REER Weight"
+    ws["B13"] = currency_mix
+    ws["B13"].number_format = "0%"
+    ws["D7"] = "Edit the weights in B7:B11. Edit currency mix in B13. Edit valuation and narrative input columns in the table below."
     ws["D7"].alignment = Alignment(wrap_text=True)
 
     headers = [
@@ -493,6 +501,17 @@ with st.sidebar:
     st.write(f"**Total Weight:** {total_w:.1%}")
     
     st.divider()
+    st.header("Currency Mix")
+    st.session_state.w_curr_mix = st.slider(
+        "REER Weight in Currency Score",
+        0.0,
+        1.0,
+        st.session_state.w_curr_mix,
+        step=0.01,
+    )
+    st.write(f"**Currency Score Mix:** {st.session_state.w_curr_mix:.0%} REER / {(1 - st.session_state.w_curr_mix):.0%} Bond Diff")
+
+    st.divider()
     st.header("Scenarios")
     st.session_state.oil_scenario = st.slider("Oil Price Change ($)", 0.0, 50.0, st.session_state.oil_scenario, step=1.0)
     
@@ -594,6 +613,7 @@ try:
         "nar": st.session_state.s_nar,
         "mcap": st.session_state.s_mcap,
     }
+    currency_mix = st.session_state.w_curr_mix
 
     if calculate_clicked:
         if research_errors:
@@ -601,7 +621,7 @@ try:
         else:
             val_df, nar_df = normalize_research_inputs(edited_val_df, edited_nar_df)
             master = build_master_dataset(gdp_j, etf_j, reer_j, oil_j, mcap_static, bond_df, val_df, nar_df)
-            calc_df = calculate_strategy(master, st.session_state.horizon, current_weights)
+            calc_df = calculate_strategy(master, st.session_state.horizon, current_weights, currency_mix)
             st.session_state.calc_snapshot = {
                 "master": master,
                 "calc_df": calc_df,
@@ -615,6 +635,7 @@ try:
                 "nar_df": nar_df,
                 "horizon": st.session_state.horizon,
                 "weights": current_weights.copy(),
+                "currency_mix": currency_mix,
                 "terminal_date": term_date,
                 "oil_scenario": st.session_state.oil_scenario,
             }
@@ -636,6 +657,7 @@ try:
                 nar_df=snapshot["nar_df"],
                 horizon=snapshot["horizon"],
                 weights=snapshot["weights"],
+                currency_mix=snapshot["currency_mix"],
                 terminal_date=snapshot["terminal_date"],
                 oil_scenario=snapshot["oil_scenario"],
             )
@@ -657,7 +679,11 @@ try:
             h = snapshot["horizon"]
             master = snapshot["master"]
             calc_df = snapshot["calc_df"]
-            st.caption("Displayed output and Excel export use the last Calculate Rank snapshot. Recalculate after changing inputs or settings.")
+            st.caption(
+                "Displayed output and Excel export use the last Calculate Rank snapshot. "
+                f"Currency score blend: {snapshot['currency_mix']:.0%} REER / {(1 - snapshot['currency_mix']):.0%} Bond Diff. "
+                "Recalculate after changing inputs or settings."
+            )
             
             if not calc_df.empty:
                 st.header(f"🏆 Strategy Output ({h}Y Horizon)")
@@ -703,14 +729,15 @@ try:
         with t_curr:
             if snapshot and not calc_df.empty:
                 st.subheader("Currency Data: REER & Bond Rank Calculation")
+                st.caption(f"Currency score blend in this snapshot: {snapshot['currency_mix']:.0%} REER / {(1 - snapshot['currency_mix']):.0%} Bond Diff")
                 curr_map = {
                     'Country': 'Country', 'Current_REER': 'Current REER', 'Avg_REER_10Y': '10Y Avg REER',
                     'REER_Upside': 'REER Upside (%)', 'R_REER': 'REER Rank',
-                    'differential with USA': 'Bond Diff vs US', 'R_Bond': 'Bond Rank', 'Currency_Score': 'Currency Score (Avg Rank)'
+                    'differential with USA': 'Bond Diff vs US', 'R_Bond': 'Bond Rank', 'Currency_Score': 'Currency Score (Weighted)'
                 }
                 st.dataframe(calc_df[list(curr_map.keys())].rename(columns=curr_map).style.format({
                     'REER Upside (%)': '{:.1%}', 'REER Rank': '{:d}', 'Bond Rank': '{:d}',
-                    'Current REER': '{:.1f}', '10Y Avg REER': '{:.1f}', 'Bond Diff vs US': '{:.1f}', 'Currency Score (Avg Rank)': '{:.1f}'
+                    'Current REER': '{:.1f}', '10Y Avg REER': '{:.1f}', 'Bond Diff vs US': '{:.1f}', 'Currency Score (Weighted)': '{:.1f}'
                 }), use_container_width=True)
         with t_qual:
             if snapshot and not calc_df.empty:

@@ -14,6 +14,7 @@ The dashboard calculates a Composite Score for over 30 countries based on five k
 - **Live/API + Static Data Integration:** Data from IMF (GDP), Yahoo Finance (ETFs), BIS (REER), plus curated static CSV/XLSX inputs in `data/static/`.
 - **Button-Gated Recalculation:** Adjust weights and research inputs without changing outputs until **Calculate Rank** is clicked.
 - **Editable Research Inputs:** Edit valuation and narrative ranks in-app, calculate with unsaved changes, and optionally save them back to `data/static/`.
+- **Currency Score Mix:** Tune the REER-vs-bond blend from 0/100 to 100/0, with 50/50 as the default.
 - **Smart Date Logic:** Fetches the most recent valid trading day on or before the selected terminal date.
 - **Data Audit:** Comprehensive transparency tabs showing the journey from raw API data to final rankings.
 
